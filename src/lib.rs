@@ -5,11 +5,12 @@ mod factory;
 mod filter;
 mod stats;
 
-use std::{fmt, str::FromStr};
 use std::error::Error as StdError;
+use std::{fmt, str::FromStr};
 
-use ring;
+use digest::Digest as DigestHash;
 use envoy::host::ByteString;
+use sha2::{Sha256, Sha384, Sha512};
 
 /// The Error type
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -81,6 +82,12 @@ impl FromStr for ShaSize {
     }
 }
 
+fn hash<D: DigestHash>(bytes: &ByteString, output: &mut [u8]) {
+    let mut hasher = D::new();
+    hasher.update(bytes.as_bytes());
+    output.copy_from_slice(&hasher.finalize());
+}
+
 /// Defines a wrapper around an &ByteString that can be turned into a `Digest`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RequestBody<'a>(&'a ByteString);
@@ -93,15 +100,14 @@ impl<'a> RequestBody<'a> {
 
     /// Consumes the `RequestBody`, producing a `Digest`.
     pub fn digest(self, sha_size: ShaSize) -> Digest {
-        let size = match sha_size {
-            ShaSize::TwoFiftySix => &ring::digest::SHA256,
-            ShaSize::ThreeEightyFour => &ring::digest::SHA384,
-            ShaSize::FiveTwelve => &ring::digest::SHA512,
+        let mut digest = [0u8; 32];
+        match sha_size {
+            ShaSize::TwoFiftySix => hash::<Sha256>(self.0, &mut digest),
+            ShaSize::ThreeEightyFour => hash::<Sha384>(self.0, &mut digest),
+            ShaSize::FiveTwelve => hash::<Sha512>(self.0, &mut digest),
         };
 
-        let d = ring::digest::digest(size, self.0);
-        let b = base64::encode(&d);
-
+        let b = base64::encode(&digest);
         Digest::from_base64_and_size(ByteString::from(b), sha_size)
     }
 }
@@ -259,7 +265,10 @@ mod tests {
         let body = RequestBody::new(some_body);
         let digest = body.digest(sha_size);
 
-        assert_eq!(Digest::from_base64_and_size(&ByteString::from(provided), sha_size), digest);
+        assert_eq!(
+            Digest::from_base64_and_size(&ByteString::from(provided), sha_size),
+            digest
+        );
     }
 
     fn digest_ne(sha_size: ShaSize) {
