@@ -106,7 +106,13 @@ impl<'a> HttpFilter for SampleHttpFilter<'a> {
                     self.digest,
                     digest.as_string()
                 );
-                return Err(format_err!("received invalid digest header for the body"));
+                if let Err(err) = filter_ops.send_response(
+                    400,
+                    &[(":status", "")],
+                    Some(b"body digest different from digest header value\n"),
+                ) {
+                    return Err(err);
+                }
             }
         }
 
